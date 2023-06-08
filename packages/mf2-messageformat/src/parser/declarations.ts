@@ -1,84 +1,78 @@
-import { MessageSyntaxError, MissingCharError } from '../errors.js';
 import type {
   DeclarationParsed,
   JunkParsed,
-  PlaceholderParsed,
+  ExpressionParsed,
   VariableRefParsed
 } from './data-model.js';
-import { parsePlaceholder } from './placeholder.js';
+import type { ParseContext } from './message.js';
+import { parseExpression } from './expression.js';
 import { whitespaces } from './util.js';
 import { parseVariable } from './values.js';
 
-// Declaration ::= 'let' WhiteSpace Variable '=' '{' Expression '}'
-export function parseDeclarations(
-  src: string,
-  errors: MessageSyntaxError[]
-): {
+export function parseDeclarations(ctx: ParseContext): {
   declarations: DeclarationParsed[];
   end: number;
 } {
-  let pos = whitespaces(src, 0);
+  let pos = whitespaces(ctx.source, 0);
   const declarations: DeclarationParsed[] = [];
-  while (src.startsWith('let', pos)) {
-    const decl = parseDeclaration(src, pos, errors);
+  while (ctx.source.startsWith('let', pos)) {
+    const decl = parseDeclaration(ctx, pos);
     declarations.push(decl);
     pos = decl.end;
-    pos += whitespaces(src, pos);
+    pos += whitespaces(ctx.source, pos);
   }
-  checkLocalVarReferences(declarations, errors);
+  checkLocalVarReferences(ctx, declarations);
   return { declarations, end: pos };
 }
 
-function parseDeclaration(
-  src: string,
-  start: number,
-  errors: MessageSyntaxError[]
-): DeclarationParsed {
+// declaration = let s variable [s] "=" [s] expression
+// let = %x6C.65.74 ; "let"
+function parseDeclaration(ctx: ParseContext, start: number): DeclarationParsed {
   let pos = start + 3; // 'let'
-  const ws = whitespaces(src, pos);
+  const ws = whitespaces(ctx.source, pos);
   pos += ws;
 
-  if (ws === 0) errors.push(new MissingCharError(pos, ' '));
+  if (ws === 0) ctx.onError('missing-char', pos, ' ');
 
   let target: VariableRefParsed | JunkParsed;
-  if (src[pos] === '$') {
-    target = parseVariable(src, pos, errors);
+  if (ctx.source[pos] === '$') {
+    target = parseVariable(ctx, pos);
     pos = target.end;
   } else {
     const junkStart = pos;
-    const junkEndOffset = src.substring(pos).search(/[\t\n\r ={}]/);
-    pos = junkEndOffset === -1 ? src.length : pos + junkEndOffset;
+    const junkEndOffset = ctx.source.substring(pos).search(/[\t\n\r ={}]/);
+    pos = junkEndOffset === -1 ? ctx.source.length : pos + junkEndOffset;
     target = {
       type: 'junk',
       start: junkStart,
       end: pos,
-      source: src.substring(junkStart, pos)
+      source: ctx.source.substring(junkStart, pos)
     };
-    errors.push(new MissingCharError(junkStart, '$'));
+    ctx.onError('missing-char', junkStart, '$');
   }
 
-  pos += whitespaces(src, pos);
-  if (src[pos] === '=') pos += 1;
-  else errors.push(new MissingCharError(pos, '='));
+  pos += whitespaces(ctx.source, pos);
+  if (ctx.source[pos] === '=') pos += 1;
+  else ctx.onError('missing-char', pos, '=');
 
-  let value: PlaceholderParsed | JunkParsed;
-  pos += whitespaces(src, pos);
-  if (src[pos] === '{') {
-    value = parsePlaceholder(src, pos, errors);
+  let value: ExpressionParsed | JunkParsed;
+  pos += whitespaces(ctx.source, pos);
+  if (ctx.source[pos] === '{') {
+    value = parseExpression(ctx, pos);
     pos = value.end;
   } else {
     const junkStart = pos;
-    const junkEndOffset = src
+    const junkEndOffset = ctx.source
       .substring(pos)
       .search(/\blet|\bmatch|\bwhen|[${}]/);
-    pos = junkEndOffset === -1 ? src.length : pos + junkEndOffset;
+    pos = junkEndOffset === -1 ? ctx.source.length : pos + junkEndOffset;
     value = {
       type: 'junk',
       start: junkStart,
       end: pos,
-      source: src.substring(junkStart, pos)
+      source: ctx.source.substring(junkStart, pos)
     };
-    errors.push(new MissingCharError(junkStart, '{'));
+    ctx.onError('missing-char', junkStart, '{');
   }
 
   return { start, end: pos, target, value };
@@ -86,12 +80,12 @@ function parseDeclaration(
 
 /** Local variable declarations can't refer to later ones */
 function checkLocalVarReferences(
-  declarations: DeclarationParsed[],
-  errors: MessageSyntaxError[]
+  ctx: ParseContext,
+  declarations: DeclarationParsed[]
 ) {
   const check = (name: string, ref: VariableRefParsed) => {
     if (ref.name === name) {
-      errors.push(new MessageSyntaxError('bad-local-var', ref.start, ref.end));
+      ctx.onError('bad-local-var', ref.start, ref.end);
     }
   };
 
@@ -100,10 +94,10 @@ function checkLocalVarReferences(
     if (!name) continue;
     for (let j = 0; j < i; ++j) {
       const ph = declarations[j].value;
-      if (ph.type === 'placeholder') {
+      if (ph.type === 'expression') {
         const exp = ph.body;
         switch (exp.type) {
-          case 'expression':
+          case 'function':
             if (exp.operand?.type === 'variable') check(name, exp.operand);
             for (const opt of exp.options) {
               if (opt.value.type === 'variable') check(name, opt.value);

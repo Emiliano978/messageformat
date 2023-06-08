@@ -73,7 +73,7 @@ function duration(_locales: string[], _options: unknown, arg?: MessageValue) {
     sign +
     first +
     ':' +
-    parts.map(n => (n < 10 ? '0' + String(n) : String(n))).join(':')
+    parts.map(n => (Number(n) < 10 ? '0' + String(n) : String(n))).join(':')
   );
 }
 Object.freeze(duration);
@@ -104,17 +104,17 @@ class MessageMF1Number extends MessageNumber {
     super(locale, number, opt);
   }
 
-  matchSelectKey(key: string) {
+  selectKey(keys: Set<string>) {
     let num = this.value;
     const offset = getMF1Offset(this.options);
     if (offset) {
       if (typeof num === 'bigint') num += BigInt(offset);
       else num += offset;
     }
-    return (
-      (/^[0-9]+$/.test(key) && key === String(num)) ||
-      key === this.getPluralCategory()
-    );
+    const str = String(num);
+    if (keys.has(str)) return str;
+    const cat = this.getPluralCategory();
+    return keys.has(cat) ? cat : null;
   }
 }
 

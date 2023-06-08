@@ -9,54 +9,39 @@ const MARKUP_END = 'markup-end';
  *
  * @beta
  */
-export class MessageMarkupStart extends MessageValue<string> {
+export class MessageMarkup extends MessageValue<string> {
   options: Record<string, unknown>;
+  operand?: MessageValue;
 
   constructor(
     locale: LocaleContextArg,
     name: string,
     {
+      kind,
       meta,
+      operand,
       options,
       source
     }: {
+      kind: 'open' | 'close';
       meta?: Readonly<Meta>;
+      operand?: MessageValue;
       options?: Readonly<Record<string, unknown>>;
       source?: string;
     }
   ) {
-    super(MARKUP_START, locale, name, { meta, source });
+    const type = kind === 'open' ? MARKUP_START : MARKUP_END;
+    super(type, locale, name, { meta, source });
     this.options = { ...options };
+    if (operand) this.operand = operand;
   }
 
-  matchSelectKey() {
-    return false;
-  }
-
-  toString() {
-    return `{+${this.value}}`;
-  }
-}
-
-/**
- * A child class of {@link MessageValue} for ending markup elements.
- *
- * @beta
- */
-export class MessageMarkupEnd extends MessageValue<string> {
-  constructor(
-    locale: LocaleContextArg,
-    name: string,
-    options: { meta?: Readonly<Meta>; source?: string }
-  ) {
-    super(MARKUP_END, locale, name, options);
-  }
-
-  matchSelectKey() {
-    return false;
+  selectKey() {
+    return null;
   }
 
   toString() {
-    return `{-${this.value}}`;
+    const sigil = this.type === MARKUP_START ? '+' : '-';
+    return `{${sigil}${this.value}}`;
   }
 }
